@@ -435,9 +435,10 @@ public:
     CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
   }
 
-  virtual void exec(assume_t &stmt) override {
-    m_inv.operator+=(stmt.constraint());
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+  
+  virtual void exec(assume_t& stmt) override {
+      m_inv.operator+=(stmt.constraint());
+      CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
   }
 
   virtual void exec(assert_t &stmt) override {

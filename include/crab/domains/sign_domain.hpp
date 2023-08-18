@@ -115,7 +115,7 @@ private:
           return;
         }
         if (lhs.greater_than_zero() &&
-            (rhs.less_than_zero() || rhs.less_or_equal_than_zero())) {
+            (rhs.less_than_zero() || rhs.less_or_equal_than_zero() || rhs.equal_zero())) {
           set_to_bottom();
           CRAB_LOG("sign-domain", crab::outs() << "\t"
                                                << "Refined _|_\n";);
@@ -376,19 +376,13 @@ public:
   void operator-=(const variable_t &v) override {
     crab::CrabStats::count(domain_name() + ".count.forget");
     crab::ScopedCrabStats __st__(domain_name() + ".forget");
-    if (!is_bottom()) {    
-      m_env -= v;
-    }
+    m_env -= v;
   }
 
   interval_t operator[](const variable_t &v) override { return at(v); }
 
   interval_t at(const variable_t &v) const override {
-    if (is_bottom()) {
-      return interval_t::bottom();
-    } else {
-      return m_env.at(v).to_interval();
-    }
+    return m_env.at(v).to_interval();
   }
 
   void operator+=(const linear_constraint_system_t &csts) override {
@@ -397,106 +391,90 @@ public:
     solve_constraints(csts);
   }
 
-  DEFAULT_ENTAILS(sign_domain_t)
-  
   void assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.assign");
     crab::ScopedCrabStats __st__(domain_name() + ".assign");
     CRAB_LOG("sign-domain", crab::outs() << x << " := " << e << "\n";);
-    if (!is_bottom()) {    
-      if (boost::optional<variable_t> v = e.get_variable()) {
-	m_env.set(x, m_env.at(*v));
-      } else {
-	m_env.set(x, eval_expr(e));
-      }
+    if (boost::optional<variable_t> v = e.get_variable()) {
+      m_env.set(x, m_env.at(*v));
+    } else {
+      m_env.set(x, eval_expr(e));
     }
     CRAB_LOG("sign-domain", crab::outs() << "RES=" << m_env.at(x) << "\n";);
   }
-
-  void weak_assign(const variable_t &x, const linear_expression_t &e) override {
-    crab::CrabStats::count(domain_name() + ".count.weak_assign");
-    crab::ScopedCrabStats __st__(domain_name() + ".weak_assign");
-    CRAB_LOG("sign-domain", crab::outs() << "weak_assign(" << x << "," << e << ")\n";);
-    if (!is_bottom()) {        
-      if (boost::optional<variable_t> v = e.get_variable()) {
-	m_env.join(x, m_env.at(*v));
-      } else {
-	m_env.join(x, eval_expr(e));
-      }
-    }
-    CRAB_LOG("sign-domain", crab::outs() << "RES=" << m_env.at(x) << "\n";);
-  }
-  
 
   void apply(crab::domains::arith_operation_t op, const variable_t &x,
              const variable_t &y, const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
     crab::ScopedCrabStats __st__(domain_name() + ".apply");
-    if (!is_bottom()) {        
-      sign_t yi = m_env.at(y);
-      sign_t zi = m_env.at(z);
-      sign_t xi = sign_t::bottom();
-      switch (op) {
-      case crab::domains::OP_ADDITION:
-	xi = yi + zi;
-	break;
-      case crab::domains::OP_SUBTRACTION:
-	xi = yi - zi;
-	break;
-      case crab::domains::OP_MULTIPLICATION:
-	xi = yi * zi;
-	break;
-      case crab::domains::OP_SDIV:
-	xi = yi / zi;
+
+    sign_t yi = m_env.at(y);
+    sign_t zi = m_env.at(z);
+    sign_t xi = sign_t::bottom();
+
+    switch (op) {
+    case crab::domains::OP_ADDITION:
+      xi = yi + zi;
       break;
-      case crab::domains::OP_UDIV:
-	xi = yi.UDiv(zi);
-	break;
-      case crab::domains::OP_SREM:
-	xi = yi.SRem(zi);
-	break;
-      case crab::domains::OP_UREM:
-	xi = yi.URem(zi);
-	break;
-      }
-      m_env.set(x, xi);
+    case crab::domains::OP_SUBTRACTION:
+      xi = yi - zi;
+      break;
+    case crab::domains::OP_MULTIPLICATION:
+      xi = yi * zi;
+      break;
+    case crab::domains::OP_SDIV:
+      xi = yi / zi;
+      break;
+    case crab::domains::OP_UDIV:
+      xi = yi.UDiv(zi);
+      break;
+    case crab::domains::OP_SREM:
+      xi = yi.SRem(zi);
+      break;
+    case crab::domains::OP_UREM:
+      xi = yi.URem(zi);
+      break;
+    default:
+      CRAB_ERROR("Operation ", op, " not supported");
     }
+    m_env.set(x, xi);
   }
 
   void apply(crab::domains::arith_operation_t op, const variable_t &x,
              const variable_t &y, number_t k) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
     crab::ScopedCrabStats __st__(domain_name() + ".apply");
-    if (!is_bottom()) {        
-      sign_t yi = m_env.at(y);
-      sign_t zi(k);
-      sign_t xi = sign_t::bottom();
-      
-      switch (op) {
-      case crab::domains::OP_ADDITION:
-	xi = yi + zi;
-	break;
-      case crab::domains::OP_SUBTRACTION:
-	xi = yi - zi;
-	break;
-      case crab::domains::OP_MULTIPLICATION:
-	xi = yi * zi;
-	break;
-      case crab::domains::OP_SDIV:
-	xi = yi / zi;
-	break;
-      case crab::domains::OP_UDIV:
-	xi = yi.UDiv(zi);
-	break;
-      case crab::domains::OP_SREM:
-	xi = yi.SRem(zi);
-	break;
-      case crab::domains::OP_UREM:
-	xi = yi.URem(zi);
-	break;
-      }
-      m_env.set(x, xi);
+
+    sign_t yi = m_env.at(y);
+    sign_t zi(k);
+    sign_t xi = sign_t::bottom();
+
+    switch (op) {
+    case crab::domains::OP_ADDITION:
+      xi = yi + zi;
+      break;
+    case crab::domains::OP_SUBTRACTION:
+      xi = yi - zi;
+      break;
+    case crab::domains::OP_MULTIPLICATION:
+      xi = yi * zi;
+      break;
+    case crab::domains::OP_SDIV:
+      xi = yi / zi;
+      break;
+    case crab::domains::OP_UDIV:
+      xi = yi.UDiv(zi);
+      break;
+    case crab::domains::OP_SREM:
+      xi = yi.SRem(zi);
+      break;
+    case crab::domains::OP_UREM:
+      xi = yi.URem(zi);
+      break;
+    default:
+      CRAB_ERROR("Operation ", op, " not supported");
     }
+    m_env.set(x, xi);
   }
 
   // intrinsics operations
@@ -547,66 +525,80 @@ public:
              const variable_t &y, const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
     crab::ScopedCrabStats __st__(domain_name() + ".apply");
-    if (!is_bottom()) {        
-      sign_t yi = m_env.at(y);
-      sign_t zi = m_env.at(z);
-      sign_t xi = sign_t::bottom();
-      
-      switch (op) {
-      case crab::domains::OP_AND: 
-	xi = yi.And(zi);
-	break;
-      case crab::domains::OP_OR: 
-	xi = yi.Or(zi);
-	break;
-      case crab::domains::OP_XOR: 
-	xi = yi.Xor(zi);
-	break;
-      case crab::domains::OP_SHL: 
-	xi = yi.Shl(zi);
-	break;
-      case crab::domains::OP_LSHR: 
-	xi = yi.LShr(zi);
-	break;
-      case crab::domains::OP_ASHR: 
-	xi = yi.AShr(zi);
-	break;
-      }
-      m_env.set(x, xi);
+
+    sign_t yi = m_env.at(y);
+    sign_t zi = m_env.at(z);
+    sign_t xi = sign_t::bottom();
+
+    switch (op) {
+    case crab::domains::OP_AND: {
+      xi = yi.And(zi);
+      break;
     }
+    case crab::domains::OP_OR: {
+      xi = yi.Or(zi);
+      break;
+    }
+    case crab::domains::OP_XOR: {
+      xi = yi.Xor(zi);
+      break;
+    }
+    case crab::domains::OP_SHL: {
+      xi = yi.Shl(zi);
+      break;
+    }
+    case crab::domains::OP_LSHR: {
+      xi = yi.LShr(zi);
+      break;
+    }
+    case crab::domains::OP_ASHR: {
+      xi = yi.AShr(zi);
+      break;
+    }
+    default:
+      CRAB_ERROR("unreachable");
+    }
+    m_env.set(x, xi);
   }
 
   void apply(crab::domains::bitwise_operation_t op, const variable_t &x,
              const variable_t &y, number_t k) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
     crab::ScopedCrabStats __st__(domain_name() + ".apply");
-    if (!is_bottom()) {            
-      sign_t yi = m_env.at(y);
-      sign_t zi(k);
-      sign_t xi = sign_t::bottom();
-      
-      switch (op) {
-      case crab::domains::OP_AND: 
-	xi = yi.And(zi);
-	break;
-      case crab::domains::OP_OR: 
-	xi = yi.Or(zi);
-	break;
-      case crab::domains::OP_XOR: 
-	xi = yi.Xor(zi);
-	break;
-      case crab::domains::OP_SHL: 
-	xi = yi.Shl(zi);
-	break;
-      case crab::domains::OP_LSHR: 
-	xi = yi.LShr(zi);
-	break;
-      case crab::domains::OP_ASHR: 
-	xi = yi.AShr(zi);
-	break;
-      }
-      m_env.set(x, xi);
+
+    sign_t yi = m_env.at(y);
+    sign_t zi(k);
+    sign_t xi = sign_t::bottom();
+
+    switch (op) {
+    case crab::domains::OP_AND: {
+      xi = yi.And(zi);
+      break;
     }
+    case crab::domains::OP_OR: {
+      xi = yi.Or(zi);
+      break;
+    }
+    case crab::domains::OP_XOR: {
+      xi = yi.Xor(zi);
+      break;
+    }
+    case crab::domains::OP_SHL: {
+      xi = yi.Shl(zi);
+      break;
+    }
+    case crab::domains::OP_LSHR: {
+      xi = yi.LShr(zi);
+      break;
+    }
+    case crab::domains::OP_ASHR: {
+      xi = yi.AShr(zi);
+      break;
+    }
+    default:
+      CRAB_ERROR("unreachable");
+    }
+    m_env.set(x, xi);
   }
 
   virtual void select(const variable_t &lhs, const linear_constraint_t &cond,
@@ -653,26 +645,26 @@ public:
   void project(const variable_vector_t &variables) override {
     crab::CrabStats::count(domain_name() + ".count.project");
     crab::ScopedCrabStats __st__(domain_name() + ".project");
-    if (!is_bottom()) {
-      m_env.project(variables);
-    }
+
+    m_env.project(variables);
   }
 
   void rename(const variable_vector_t &from,
               const variable_vector_t &to) override {
     crab::CrabStats::count(domain_name() + ".count.rename");
     crab::ScopedCrabStats __st__(domain_name() + ".rename");
-    if (!is_bottom()) {
-      m_env.rename(from, to);
-    }
+
+    m_env.rename(from, to);
   }
 
   void expand(const variable_t &x, const variable_t &new_x) override {
     crab::CrabStats::count(domain_name() + ".count.expand");
     crab::ScopedCrabStats __st__(domain_name() + ".expand");
+
     if (is_bottom() || is_top()) {
       return;
     }
+
     m_env.set(new_x, m_env.at(x));
   }
 
@@ -683,6 +675,7 @@ public:
   void write(crab::crab_os &o) const override {
     crab::CrabStats::count(domain_name() + ".count.write");
     crab::ScopedCrabStats __st__(domain_name() + ".write");
+
     m_env.write(o);
   }
 
@@ -691,7 +684,9 @@ public:
                            ".count.to_linear_constraint_system");
     crab::ScopedCrabStats __st__(domain_name() +
                                  ".to_linear_constraint_system");
+
     linear_constraint_system_t csts;
+
     if (this->is_bottom()) {
       csts += linear_constraint_t::get_false();
       return csts;

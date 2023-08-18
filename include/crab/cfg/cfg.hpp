@@ -112,6 +112,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
+//edited
+#include <iostream>
+#include <vector>
+#include <tuple>
+
 namespace crab {
 namespace cfg {
 
@@ -463,6 +468,7 @@ private:
   linear_expression_t m_rhs;
 };
 
+
 template <class BasicBlockLabel, class Number, class VariableName>
 class assume_stmt : public statement<BasicBlockLabel, Number, VariableName> {
 
@@ -481,6 +487,77 @@ public:
   }
 
   const linear_constraint_t &constraint() const { return m_cst; }
+  ///////////////////////////////////////////////////////////////////////////
+  //edited
+  //start
+  ///////////////////////////////////////////////////////////////////////////
+  
+  void set_local_policy(bool first, ikos::index_t index, int p, VariableName name) {
+      //set local policy for first or not first (second) variable in linear constraint m_cst
+      if (first) {
+          //set index and local policy for first variable in linear constraint m_cst
+          std::pair<ikos::index_t, int> temp;
+          temp.first = index;
+          temp.second = p;
+          local_policy_1 = temp;
+
+          //set variable name for printing
+          name_var_1 = name;
+
+          //when applying local policies only the linear constraint m_cst is available
+          //set local policy also in linear constraint
+          m_cst.set_local_policy(true, index, p);
+      }
+      else {
+          //set index and local policy for second variable in linear constraint m_cst
+          std::pair<ikos::index_t, int> temp;
+          temp.first = index;
+          temp.second = p;
+          local_policy_2 = temp;
+
+          //set variable name for printing
+          name_var_2 = name;
+
+          //when applying local policies only the linear constraint m_cst is available
+          //set local policy also in linear constraint
+          m_cst.set_local_policy(false, index, p);
+      }
+  }
+
+  //returns local policy for first or not first (second) variable in linear constraint m_cst
+  boost::optional<std::pair<ikos::index_t, int>> get_local_policy(bool first) {
+      if (first) { 
+          return local_policy_1;
+      } else { 
+          return local_policy_2;
+      } 
+  }
+
+  //set local policy and name for first or not first (second) variable in linear constraint m_cst back to empty boost::optional
+  void reset_local_policy(bool first) {
+      if (first) {
+          local_policy_1 = boost::optional<std::pair<ikos::index_t, int>>();
+          name_var_1 = boost::optional<VariableName>();
+
+          //reset also the local policy stored in linear constraint
+          m_cst.reset_local_policy(true);
+      }
+      else {
+          local_policy_2 = boost::optional<std::pair<ikos::index_t, int>>();
+          name_var_2 = boost::optional<VariableName>();
+
+          //reset also the local policy stored in linear constraint
+          m_cst.reset_local_policy(false);
+      }
+  }
+
+  void set_ttv_sign_index(std::vector<std::tuple<ikos::index_t,int>> v, int si, variable_t index) {
+      ttv = v;
+      o_sign = si;
+      v_index = index;
+      m_cst.set_ttv_sign_index(v, si, index);
+  }
+
 
   virtual void
   accept(statement_visitor<BasicBlockLabel, Number, VariableName> *v) override {
@@ -491,13 +568,92 @@ public:
     return new this_type(m_cst, parent);
   }
 
+  //write() edited to print also local policies if available
   virtual void write(crab_os &o) const override {
     o << "assume(" << m_cst << ")"; //  << " " << this->m_live;
+    bool policy_printed = false;
+    if (local_policy_1) {
+        policy_printed = true;
+        int temp = (*local_policy_1).second;
+        o << "(local policy: ";
+        o << "<";
+        o << *name_var_1;
+        o << ", ";
+        switch (temp) {
+        case 0:
+            o << "l";
+            break;
+        case 1:
+            o << "r";
+            break;
+        case 2:
+            o << "m";
+            break;
+        case 3:
+            o << "i";
+            break;
+        default:
+            //stays empty
+            break;
+        }
+        o << ">";
+    }
+    if (local_policy_2) {
+        policy_printed = true;
+        int temp = (*local_policy_2).second;
+        o << " <";
+        o << *name_var_2;
+        o << ", ";
+            switch (temp) {
+            case 0:
+                o << "l";
+                break;
+            case 1:
+                o << "r";
+                break;
+            case 2:
+                o << "m";
+                break;
+            case 3:
+                o << "i";
+                break;
+            default:
+                //stays empty
+                break;
+            }
+        o << ">";
+    }
+    if (policy_printed) {
+        o << ")";
+    }
   }
 
 private:
   linear_constraint_t m_cst;
+  //edited
+  //local policies for first (and second) variable of assume statement
+  //0 = l
+  //1 = r
+  //2 = m
+  //3 = i
+  //index of variable
+  boost::optional<std::pair<ikos::index_t,int>> local_policy_1;
+  boost::optional<std::pair<ikos::index_t, int>> local_policy_2;
+
+  //name of first (and second) variable of assume statement
+  //for printing
+  boost::optional<VariableName> name_var_1;
+  boost::optional<VariableName> name_var_2;
+
+  boost::optional<std::vector<std::tuple<ikos::index_t, int>>> ttv;
+  boost::optional<int> o_sign;
+  boost::optional<variable_t> v_index;
 };
+
+///////////////////////////////////////////////////////////////////////////
+//edited
+//end
+///////////////////////////////////////////////////////////////////////////
 
 template <class BasicBlockLabel, class Number, class VariableName>
 class unreachable_stmt

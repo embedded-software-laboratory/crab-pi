@@ -470,8 +470,12 @@ template <typename Number>
 void interval<Number>::write(crab::crab_os &o) const {
   if (is_bottom()) {
     o << "_|_";
-  } else {
-    o << "[" << _lb << ", " << _ub << "]";
+  }
+  else if (is_top()) {
+      o << "[-oo, +oo]";
+  }
+  else{
+      o << "[" << _lb << ", " << _ub << "]";
   }
 }
 

@@ -51,6 +51,9 @@
 #include <crab/domains/separate_domains.hpp>
 #include <crab/support/stats.hpp>
 
+//edited
+#include <iostream>
+
 namespace ikos {
 
 template <typename Number, typename VariableName,
@@ -98,28 +101,249 @@ private:
     }
     return r;
   }
+  //edited
+  //-----------------------------------------------------------------------------------------------------------------------------
   void add(const linear_constraint_system_t &csts,
            std::size_t threshold = max_reduction_cycles) {
-    if (!this->is_bottom()) {
-      // XXX: filter out unsigned linear inequalities
-      linear_constraint_system_t signed_csts;
-      for (auto const &c : csts) {
-        if (c.is_inequality() && c.is_unsigned()) {
-          // CRAB_WARN("unsigned inequality skipped");
-          continue;
+    crab::crab_os os(&std::cout);
+
+    //variables for local policies
+    boost::optional<std::pair<ikos::index_t, int>> local_policy_1;
+    boost::optional<std::pair<ikos::index_t, int>> local_policy_2;
+
+    //counter for constraints in linear constraint system csts
+    int cst_counter = 0;
+
+    //variable for first linear constraint in linear constraint system csts
+    linear_constraint_t cst;
+
+    //get first linear constraint in linear constraint system csts
+    //and local policies in this linear constraint
+    for (auto const& c : csts) {
+        cst_counter = cst_counter + 1;
+        local_policy_1 = c.get_local_policy(true);
+        local_policy_2 = c.get_local_policy(false);
+        cst = c;
+    }
+    //linear constraint system csts should only contain one linear constraint
+    //otherwise unexpected behavior
+    if (cst_counter >= 2) {
+        os << "WARNING: more than one constraint in linear constraint system\n";
+    }
+
+    //check if local policies are available
+    if (local_policy_1) {
+        //assume that the assume stmt has at least one variable
+
+        //get variables and their coefficients of linear constraint
+        std::vector<variable_t> var;
+        std::vector<Number> coeff;
+        for (auto var_tuple : cst.expression()) {
+            var.push_back(var_tuple.second);
+            coeff.push_back(var_tuple.first);
         }
-	if (c.is_disequation()) {
-	  // We try to convert a disequation into a strict inequality
-	  crab::domains::constraint_simp_domain_traits<interval_domain_t>::
-	    lower_disequality(*this, c, signed_csts);
-	}
-        signed_csts += c;
-      }
-      solver_t solver(signed_csts, threshold);
-      solver.run(this->_env);
+
+        //check if linear constraint contains has more than 2 variables
+        if (var.size() >= 3) {
+            //data structure allows more than 2 variables but llvm can only compare 2 variables in one instruction
+            //should not happen
+            os << "WARNING: Linear contstraint with more than 2 variables\n";
+        }
+
+        //compare the indexes in local_policy_1 and local_policy_2 with the variables in the constraint
+        //only important for detecting unexpected behavior
+        ikos::index_t index_1 = (*local_policy_1).first;
+        if ((var.size() == 1) && (index_1 != var.at(0).index())) {
+            //linear constraint has one variable
+            //index_1 does not match index of first variable of linear constraint
+            os << "ERROR: variable in local_policy_1 does not match with variable in assume stmt\n";
+        }
+        if (local_policy_2) {
+            //linear constraint has two variables
+            ikos::index_t index_2 = (*local_policy_2).first;
+            if ((index_1 == var.at(0).index()) && (index_2 != var.at(1).index())) {
+                //index_1 matches but index_2 does not
+                os << "ERROR: variable in local_policy_2 does not match with variable in assume stmt\n";
+            }
+            else if ((index_1 != var.at(0).index()) && (index_2 == var.at(1).index())) {
+                //index_1 does not match but index_2 does
+                os << "ERROR: variable in local_policy_1 does not match with variable in assume stmt\n";
+            }
+            else if ((index_1 != var.at(0).index()) && (index_2 != var.at(1).index())) {
+                if ((index_1 == var.at(1).index()) && (index_2 == var.at(0).index())) {
+                    //index_1 and index_2 are swapped
+                    //swap variables and coefficients in var and coeff vectors
+                    variable_t temp_var = var.at(0);
+                    var.at(0) = var.at(1);
+                    var.at(1) = temp_var;
+                    Number temp_coeff = coeff.at(0);
+                    coeff.at(0) = coeff.at(1);
+                    coeff.at(1) = temp_coeff;
+                }
+                else {
+                    //index_1 and index_2 does not match
+                    os << "ERROR: variables in local_policy_1 and local_policy_2 do not match with variables in assume stmt\n";
+                }
+            }
+        }
+
+        
+        //Z-Number for checking if coefficient of a variable in linear constraint is 1 or -1
+        ikos::z_number one = ikos::z_number(1);
+
+        //Z-Number for inverting the sign of rhs of linear constraint
+        ikos::z_number minus_one = ikos::z_number(-1);
+
+        //constant rhs of linear constraint
+        Number rhs = cst.expression().constant();
+        //rhs of the constraint is multiplied by -1 because the constraint is stored as a linear expression
+        //x <= C is stored as x + (-C) <= 0
+        rhs = rhs * minus_one;
+        
+        
+        //bound of interval
+        using bound_t = ikos::bound<Number>;
+        //init temp lower and upper bounds
+        bound_t temp_lb = bound_t(0);
+        bound_t temp_ub = bound_t(0);
+
+        if (var.size() == 1) {
+            //+/-x <= C
+            
+            //get current interval for x
+            interval_t in_1 = this->_env.at(var.at(0));
+
+            //interval for constraint (right)
+            //init with top
+            interval_t in_cst = interval_t::top();
+
+            //compute constraint interval(right)
+            if (coeff.at(0) == one) {
+                //x <= C
+                //constraint interval (right) is [-oo, C]
+                temp_ub = bound_t(rhs);
+                in_cst = interval_t(in_cst.lb(), temp_ub);
+            }
+            else {
+                //-x <= C or x >= -C
+                //constraint interval (right) is [-C, +oo]
+                temp_lb = bound_t(minus_one * rhs);
+                in_cst = interval_t(temp_lb, in_cst.ub());
+            }
+
+            //get coresponding interval for local policy, left and right interval
+            in_1 = apply_policy((*local_policy_1).second, in_1, in_cst);
+
+            //set interval for x
+            this->_env.set(var.at(0), in_1);
+        }
+
+        if (var.size() == 2) {
+            //+x + -y <= -1/0
+            //or 
+            //-x + +y <= -1/0
+
+            //get current interval for x and y
+            interval_t in_1 = this->_env.at(var.at(0));
+            interval_t in_2 = this->_env.at(var.at(1));
+
+            //interval for constraint (right)
+            //init with top
+            //x and y consider themself as left
+            interval_t in_cst_1 = interval_t::top();
+            interval_t in_cst_2 = interval_t::top();
+
+            //compute constraint interval (right) for x
+            if (coeff.at(0) == one) {
+                //x + -y <= C (C in {-1,0})
+                //or x <= C + y
+                //constraint interval (right) is [-oo, (C + y.ub)]
+                temp_ub = bound_t(rhs) + in_2.ub();
+                in_cst_1 = interval_t(in_cst_1.lb(), temp_ub);
+            }
+            else {
+                //-x + y <= C (C in {-1,0})
+                //or x >= -C + y
+                //constraint interval (right) is [(-C + y.lb), +oo]
+                temp_lb = bound_t(minus_one * rhs) + in_2.lb();
+                in_cst_1 = interval_t(temp_lb, in_cst_1.ub());
+            }
+
+            //compute constraint interval (right) for y
+            if (coeff.at(1) == one) {
+                //-x + y <= C (C in {-1,0})
+                //or y <= C + x
+                //constraint interval (right) is [-oo, (C + x.ub)]
+                temp_ub = bound_t(rhs) + in_1.ub();
+                in_cst_2 = interval_t(in_cst_2.lb(), temp_ub);
+            }
+            else {
+                //x + -y <= C (C in {-1,0})
+                //or y >= -C + x
+                //constraint interval (right) is [(-C + x.lb), +oo]
+                temp_lb = bound_t(minus_one * rhs) + in_1.lb();
+                in_cst_2 = interval_t(temp_lb, in_cst_2.ub());
+            }
+
+            //get coresponding interval for local policy, left and right interval for x
+            in_1 = apply_policy((*local_policy_1).second, in_1, in_cst_1);
+            //get coresponding interval for local policy, left and right interval for y
+            in_2 = apply_policy((*local_policy_2).second, in_2, in_cst_2);
+
+            //set interval for x
+            this->_env.set(var.at(0), in_1);
+            //set interval for y
+            this->_env.set(var.at(1), in_2);
+        }
+
+        
+        
+    }
+
+    //if no local policy is available then apply normal behavior of add()
+    else {
+        if (!this->is_bottom()) {
+            // XXX: filter out unsigned linear inequalities
+            linear_constraint_system_t signed_csts;
+            for (auto const& c : csts) {
+                if (c.is_inequality() && c.is_unsigned()) {
+                    // CRAB_WARN("unsigned inequality skipped");
+                    continue;
+                }
+                if (c.is_disequation()) {
+                    // We try to convert a disequation into a strict inequality
+                    crab::domains::constraint_simp_domain_traits<interval_domain_t>::
+                        lower_disequality(*this, c, signed_csts);
+                }
+                signed_csts += c;
+            }
+            solver_t solver(signed_csts, threshold);
+            solver.run(this->_env);
+        }
     }
   }
 
+  //returns the coresponding interval for a local policy p with left and right interval as input
+  interval_t apply_policy(int p, interval_t left, interval_t right) {
+      switch (p) {
+      case 0: //policy l
+          return left;
+          break;
+      case 1: //policy r
+          return right;
+          break;
+      case 2: //policy m
+          return interval_t(left.lb(), right.ub());
+          break;
+      case 3: //policy i
+          return interval_t(right.lb(), left.ub());
+          break;
+      default:
+          return left;
+          break;
+      }
+  }
+  //-----------------------------------------------------------------------------------------------------------------------------
   interval_domain_t operator+(const linear_constraint_system_t &csts) {
     interval_domain_t e(this->_env);
     e += csts;
@@ -242,47 +466,13 @@ public:
     return this->_env.at(v);
   }
 
+  
   void operator+=(const linear_constraint_system_t &csts) override {
     crab::CrabStats::count(domain_name() + ".count.add_constraints");
     crab::ScopedCrabStats __st__(domain_name() + ".add_constraints");
     this->add(csts);
   }
 
-  virtual bool entails(const linear_constraint_t &cst) const override {	
-    if (is_bottom()) {							
-      return true;							
-    } if (cst.is_tautology()) {						
-      return true;							
-    } if (cst.is_contradiction()) {					
-      return false;							
-    }
-
-    // val is modified after the check
-    auto entailmentFn = [](interval_domain_t &val, const linear_constraint_t &c) -> bool {	
-      linear_constraint_t neg_c = c.negate();			        
-      val += neg_c;						        
-      return val.is_bottom();					        
-    };
-
-    // Get only relevant state wrt cst variables
-    interval_domain_t val;
-    for (auto const&v: cst.variables()) {
-      val.set(v, at(v));
-    }
-
-    if (cst.is_equality()) {						
-      linear_constraint_t pob1(cst.expression(),linear_constraint_t::INEQUALITY);
-      interval_domain_t tmp(val);
-      if (!entailmentFn(tmp, pob1)) {
-	return false;
-      }
-      linear_constraint_t pob2(cst.expression() * number_t(-1), linear_constraint_t::INEQUALITY);   	 
-      return entailmentFn(val, pob2);		
-    } else {								
-      return entailmentFn(val, cst);						
-    }									
-  }
-  
   void assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.assign");
     crab::ScopedCrabStats __st__(domain_name() + ".assign");
@@ -298,22 +488,6 @@ public:
     }
   }
 
-  void weak_assign(const variable_t &x, const linear_expression_t &e) override {
-    crab::CrabStats::count(domain_name() + ".count.weak_assign");
-    crab::ScopedCrabStats __st__(domain_name() + ".weak_assign");
-
-    if (boost::optional<variable_t> v = e.get_variable()) {
-      this->_env.join(x, this->_env.at(*v));
-    } else {
-      interval_t r = e.constant();
-      for (auto kv : e) {
-        r += kv.first * this->_env.at(kv.second);
-      }
-      this->_env.join(x, r);
-    }
-  }
-
-  
   void apply(crab::domains::arith_operation_t op, const variable_t &x,
              const variable_t &y, const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
@@ -543,7 +717,6 @@ public:
   ARRAY_OPERATIONS_NOT_IMPLEMENTED(interval_domain_t)
   REGION_AND_REFERENCE_OPERATIONS_NOT_IMPLEMENTED(interval_domain_t)
 
-  
   void forget(const variable_vector_t &variables) override {
     if (is_bottom() || is_top()) {
       return;

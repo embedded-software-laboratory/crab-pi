@@ -58,6 +58,8 @@
 #include <unordered_set>
 #include <vector>
 
+
+
 namespace ikos {
 
 template <typename Number, typename VariableName> class linear_expression {
@@ -609,6 +611,19 @@ private:
   // By default all constraints are signed.
   bool _signedness;
 
+  //edited
+  //local policies for first (and second) variable of linear constraint of assume statement
+  //0 = l
+  //1 = r
+  //2 = m
+  //3 = i
+  //index of variable
+  boost::optional<std::pair<ikos::index_t, int>> local_policy_1;
+  boost::optional<std::pair<ikos::index_t, int>> local_policy_2;
+  boost::optional<std::vector<std::tuple<ikos::index_t, int>>> ttv;
+  boost::optional<int> o_sign;
+  boost::optional<variable_t> v_index;
+
 public:
   linear_constraint() : _kind(EQUALITY), _signedness(true) {}
 
@@ -631,6 +646,65 @@ public:
 
   linear_constraint_t &operator=(linear_constraint_t &&c) = default;
 
+  //edited
+  //-----------------------------------------------------------------------------------------
+  
+  //set local policy for first or not first (second) variable in linear constraint
+  void set_local_policy(bool first, ikos::index_t index, int p) {
+      if (first) {
+          //set index and local policy for first variable in linear constraint
+          std::pair<ikos::index_t, int> temp;
+          temp.first = index;
+          temp.second = p;
+          local_policy_1 = temp;
+      }
+      else {
+          //set index and local policy for second variable in linear constraint
+          std::pair<ikos::index_t, int> temp;
+          temp.first = index;
+          temp.second = p;
+          local_policy_2 = temp;
+      }
+  }
+
+  //returns local policy for first or not first (second) variable in linear constraint
+  boost::optional<std::pair<ikos::index_t, int>> get_local_policy(bool first) const {
+      if (first) {
+          return local_policy_1;
+      }
+      else {
+          return local_policy_2;
+      }
+  }
+
+  //set local policy for first or not first (second) variable in linear constraint back to empty boost::optional
+  void reset_local_policy(bool first) {
+      if (first) {
+          local_policy_1 = boost::optional<std::pair<ikos::index_t, int>>();
+      }
+      else {
+          local_policy_2 = boost::optional<std::pair<ikos::index_t, int>>();
+      }
+  }
+
+  void set_ttv_sign_index(std::vector<std::tuple<ikos::index_t, int>> v, int si, variable_t index) {
+      ttv = v;  
+      o_sign = si;
+      v_index = index;
+  }
+
+  boost::optional<std::vector<std::tuple<ikos::index_t, int>>> get_ttv() const {
+      return ttv;
+  }
+
+  boost::optional<int> get_sign() const {
+      return o_sign;
+  }
+
+  boost::optional<variable_t> get_v_index() const {
+      return v_index;
+  }
+  //-----------------------------------------------------------------------------------------
   static linear_constraint_t get_true() {
     linear_constraint_t res(linear_expression_t(Number(0)), EQUALITY);
     return res;
